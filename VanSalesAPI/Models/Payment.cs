@@ -15,7 +15,12 @@
 
         // 🔗 العميل
         public int CustomerId { get; set; }
-
+        public decimal AmountOriginal { get; set; }
         public Customer Customer { get; set; }
+        public Currency Currency { get; set; }
+        public decimal ExchangeRate { get; set; }
+
+        public decimal AmountBase { get; set; }
+
     }
 }

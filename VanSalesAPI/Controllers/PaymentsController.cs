@@ -18,7 +18,7 @@ namespace VanSalesAPI.Controllers
         {
             _context = context;
         }
-
+        /*
         // 💰 إضافة دفعة
         [Authorize(Roles = "Admin,Salesman")]
         [HttpPost]
@@ -83,7 +83,109 @@ namespace VanSalesAPI.Controllers
                 ));
             }
         }
+        */
+        [Authorize(Roles = "Admin,Salesman")]
+        [HttpPost]
+        public async Task<ActionResult> AddPayment(PaymentCreateDto dto)
+        {
+            using var transaction = await _context.Database.BeginTransactionAsync();
 
+            try
+            {
+                if (dto.Amount <= 0)
+                    return BadRequest(new ApiResponse<string>(
+                        false,
+                        "Amount must be greater than zero",
+                        null
+                    ));
+
+                var customer = await _context.Customers
+                    .FirstOrDefaultAsync(c => c.Id == dto.CustomerId);
+
+                if (customer == null)
+                    return BadRequest(new ApiResponse<string>(
+                        false,
+                        "Customer not found",
+                        null
+                    ));
+
+                // ==========================================
+                // 💱 حساب القيمة الأساسية
+                // ==========================================
+                decimal amountBase;
+
+                if (dto.Currency == Currency.SYP)
+                {
+                    if (dto.ExchangeRate <= 0)
+                        return BadRequest(new ApiResponse<string>(
+                            false,
+                            "Exchange rate is required",
+                            null
+                        ));
+
+                    amountBase = dto.Amount / dto.ExchangeRate;
+                }
+                else
+                {
+                    amountBase = dto.Amount;
+                }
+
+                // ==========================================
+                // 💰 إنشاء الدفعة
+                // ==========================================
+                var payment = new Payment
+                {
+                    CustomerId = dto.CustomerId,
+
+                    AmountOriginal = dto.Amount,
+
+                    Currency = dto.Currency,
+
+                    ExchangeRate = dto.Currency == Currency.USD
+                        ? 1
+                        : dto.ExchangeRate,
+
+                    AmountBase = amountBase,
+
+                    Date = DateTime.Now,
+
+                    Notes = dto.Notes
+                };
+
+                _context.Payments.Add(payment);
+
+                // ==========================================
+                // 📊 تحديث الرصيد
+                // ==========================================
+                customer.Balance -= amountBase;
+
+                await _context.SaveChangesAsync();
+                await transaction.CommitAsync();
+
+                return Ok(new ApiResponse<object>(
+                    true,
+                    "Payment added successfully",
+                    new
+                    {
+                        payment.Id,
+                        payment.AmountOriginal,
+                        payment.AmountBase,
+                        payment.Currency,
+                        customerBalance = customer.Balance
+                    }
+                ));
+            }
+            catch (Exception ex)
+            {
+                await transaction.RollbackAsync();
+
+                return BadRequest(new ApiResponse<string>(
+                    false,
+                    ex.Message,
+                    null
+                ));
+            }
+        }
         // 📊 كشف الحساب
         [Authorize(Roles = "Admin,Manager")]
         [HttpGet("statement/{customerId}")]
@@ -105,7 +207,7 @@ namespace VanSalesAPI.Controllers
                 {
                     Date = i.Date,
                     Type = "Invoice",
-                    Debit = i.Total,
+                    Debit = i.TotalBase,
                     Credit = 0m
                 })
                 .ToListAsync();
@@ -117,7 +219,7 @@ namespace VanSalesAPI.Controllers
                     Date = p.Date,
                     Type = "Payment",
                     Debit = 0m,
-                    Credit = p.Amount
+                    Credit = p.AmountBase
                 })
                 .ToListAsync();
 

@@ -272,7 +272,7 @@ namespace VanSalesAPI.Controllers
                 ));
             }
         }
-
+        /*
         // 💰 ربح السيارات
         [Authorize(Roles = "Admin,Manager")]
         [HttpGet("profit")]
@@ -297,6 +297,50 @@ namespace VanSalesAPI.Controllers
                     Profit =
                         g.Sum(x => x.Qty * x.Price) -
                         g.Sum(x => x.Qty * x.Product.Cost)
+                })
+                .ToListAsync();
+
+            return Ok(new ApiResponse<object>(
+                true,
+                "Profit report loaded successfully",
+                result
+            ));
+        }*/
+        [Authorize(Roles = "Admin,Manager")]
+        [HttpGet("profit")]
+        public async Task<ActionResult> GetVanProfit()
+        {
+            var result = await _context.InvoiceItems
+                .Where(i => i.Invoice.VanId != null)
+                .GroupBy(i => i.Invoice.VanId)
+                .Select(g => new VanProfitDto
+                {
+                    VanId = g.Key.Value,
+
+                    VanName = _context.Vans
+                        .Where(v => v.Id == g.Key)
+                        .Select(v => v.Name)
+                        .FirstOrDefault(),
+
+                    // ======================
+                    // 💲 USD PROFIT
+                    // ======================
+                    TotalSalesUSD = g.Sum(x => x.Qty * x.Price),
+                    TotalCostUSD = g.Sum(x => x.Qty * x.Product.Cost),
+
+                    ProfitUSD =
+                        g.Sum(x => x.Qty * x.Price) -
+                        g.Sum(x => x.Qty * x.Product.Cost),
+
+                    // ======================
+                    // 🇸🇾 SYP PROFIT
+                    // ======================
+                    TotalSalesSYP = g.Sum(x => x.Qty * x.Price * x.Invoice.ExchangeRate),
+                    TotalCostSYP = g.Sum(x => x.Qty * x.Product.Cost * x.Invoice.ExchangeRate),
+
+                    ProfitSYP =
+                        g.Sum(x => x.Qty * x.Price * x.Invoice.ExchangeRate) -
+                        g.Sum(x => x.Qty * x.Product.Cost * x.Invoice.ExchangeRate)
                 })
                 .ToListAsync();
 

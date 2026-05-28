@@ -28,7 +28,7 @@ namespace VanSalesAPI.Controllers
                 .Select(g => new DailySalesDto
                 {
                     Date = g.Key,
-                    Total = g.Sum(x => x.Total)
+                    Total = g.Sum(x => x.TotalBase)
                 })
                 .OrderBy(x => x.Date)
                 .ToListAsync();
@@ -88,6 +88,7 @@ namespace VanSalesAPI.Controllers
         }
 
         // 📊 Dashboard
+        /*
         [HttpGet]
         public async Task<ActionResult> GetDashboard()
         {
@@ -104,9 +105,15 @@ namespace VanSalesAPI.Controllers
 
             var invoices = await _context.Invoices.ToListAsync();
 
-            var totalSales = invoices.Sum(i => i.Total);
-            var totalCash = invoices.Where(i => i.Type == "cash").Sum(i => i.Total);
-            var totalCredit = invoices.Where(i => i.Type == "credit").Sum(i => i.Total);
+            var totalSales = invoices.Sum(i => i.TotalBase);
+
+            var totalCash = invoices
+                .Where(i => i.Type == "cash")
+                .Sum(i => i.TotalBase);
+
+            var totalCredit = invoices
+                .Where(i => i.Type == "credit")
+                .Sum(i => i.TotalBase);
 
             var customersCount = await _context.Customers.CountAsync();
             var productsCount = await _context.Products.CountAsync();
@@ -119,7 +126,7 @@ namespace VanSalesAPI.Controllers
                 .Select(g => new
                 {
                     VanId = g.Key,
-                    Sales = g.Sum(x => x.Total)
+                    Sales = g.Sum(x => x.TotalBase)
                 })
                 .ToListAsync();
 
@@ -155,6 +162,7 @@ namespace VanSalesAPI.Controllers
                 ProductsCount = productsCount,
                 VansCount = vans.Count,
                 Vans = vanSummaries
+
             };
 
             _cache.Set(cacheKey, result, TimeSpan.FromMinutes(5));
@@ -164,6 +172,124 @@ namespace VanSalesAPI.Controllers
                 "Dashboard loaded successfully",
                 result
             ));
-        }
+        }*/
+        // 📊 Dashboard
+[HttpGet]
+public async Task<ActionResult> GetDashboard()
+{
+    string cacheKey = "dashboard_data";
+
+    if (_cache.TryGetValue(cacheKey, out DashboardDto cachedResult))
+    {
+        return Ok(new ApiResponse<DashboardDto>(
+            true,
+            "Dashboard loaded from cache",
+            cachedResult
+        ));
+    }
+
+    var invoices = await _context.Invoices.ToListAsync();
+
+    // =======================
+    // 📊 BASE TOTALS
+    // =======================
+    var totalSales = invoices.Sum(i => i.TotalBase);
+    var totalCash = invoices
+        .Where(i => i.Type == "cash")
+        .Sum(i => i.TotalBase);
+
+    var totalCredit = invoices
+        .Where(i => i.Type == "credit")
+        .Sum(i => i.TotalBase);
+
+    // =======================
+    // 💲 USD TOTALS
+    // =======================
+    var totalSalesUSD = invoices.Sum(i => i.TotalBase);
+    var totalCashUSD = invoices
+        .Where(i => i.Type == "cash")
+        .Sum(i => i.TotalBase);
+
+    var totalCreditUSD = invoices
+        .Where(i => i.Type == "credit")
+        .Sum(i => i.TotalBase);
+
+    // =======================
+    // 📦 COUNTS
+    // =======================
+    var customersCount = await _context.Customers.CountAsync();
+    var productsCount = await _context.Products.CountAsync();
+    var vans = await _context.Vans.ToListAsync();
+
+    // =======================
+    // 🚐 VAN SALES
+    // =======================
+    var vanSales = await _context.Invoices
+        .Where(i => i.VanId != null)
+        .GroupBy(i => i.VanId)
+        .Select(g => new
+        {
+            VanId = g.Key,
+            Sales = g.Sum(x => x.TotalBase)
+        })
+        .ToListAsync();
+
+    // =======================
+    // 📦 VAN STOCK
+    // =======================
+    var vanStocks = await _context.VanStocks
+        .GroupBy(v => v.VanId)
+        .Select(g => new
+        {
+            VanId = g.Key,
+            Stock = g.Sum(x => x.Quantity)
+        })
+        .ToListAsync();
+
+    var vanSummaries = vans.Select(v =>
+    {
+        var sales = vanSales.FirstOrDefault(x => x.VanId == v.Id)?.Sales ?? 0;
+        var stock = vanStocks.FirstOrDefault(x => x.VanId == v.Id)?.Stock ?? 0;
+
+        return new VanSummaryDto
+        {
+            VanId = v.Id,
+            VanName = v.Name,
+            Sales = sales,
+            StockItems = stock
+        };
+    }).ToList();
+
+    // =======================
+    // 📊 RESULT
+    // =======================
+    var result = new DashboardDto
+    {
+        // BASE
+        TotalSales = totalSales,
+        TotalCash = totalCash,
+        TotalCredit = totalCredit,
+
+        // USD
+        TotalSalesUSD = totalSalesUSD,
+        TotalCashUSD = totalCashUSD,
+        TotalCreditUSD = totalCreditUSD,
+
+        // COUNTS
+        CustomersCount = customersCount,
+        ProductsCount = productsCount,
+        VansCount = vans.Count,
+
+        Vans = vanSummaries
+    };
+
+    _cache.Set(cacheKey, result, TimeSpan.FromMinutes(5));
+
+    return Ok(new ApiResponse<DashboardDto>(
+        true,
+        "Dashboard loaded successfully",
+        result
+    ));
+}
     }
 }

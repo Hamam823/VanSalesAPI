@@ -18,8 +18,130 @@ namespace VanSalesAPI.Controllers
         {
             _context = context;
         }
+        [HttpPost]
+        [Authorize(Roles = "Admin,Salesman")]
+        public async Task<IActionResult> CreateInvoice(InvoiceCreateDto dto)
+        {
+            using var transaction = await _context.Database.BeginTransactionAsync();
 
+            try
+            {
+                if (dto.Items == null || !dto.Items.Any())
+                    return BadRequest("Invoice must have items");
+
+                var customer = await _context.Customers.FindAsync(dto.CustomerId);
+                if (customer == null)
+                    return BadRequest("Customer not found");
+
+                // ===============================
+                // 🧾 إنشاء الفاتورة الأساسية
+                // ===============================
+                var invoice = new Invoice
+                {
+                    CustomerId = dto.CustomerId,
+                    Type = dto.Type,
+                    Date = DateTime.Now,
+                    Currency = dto.Currency
+                };
+
+                _context.Invoices.Add(invoice);
+                await _context.SaveChangesAsync();
+
+                decimal totalBase = 0;
+
+                // ===============================
+                // 📦 معالجة العناصر
+                // ===============================
+                foreach (var item in dto.Items)
+                {
+                    var product = await _context.Products.FindAsync(item.ProductId);
+
+                    if (product == null)
+                        return BadRequest($"Product {item.ProductId} not found");
+
+                    if (product.Stock < item.Qty)
+                        return BadRequest($"Not enough stock for {product.Name}");
+
+                    decimal lineBase = product.Price * item.Qty;
+                    totalBase += lineBase;
+
+                    product.Stock -= item.Qty;
+
+                    _context.InvoiceItems.Add(new InvoiceItem
+                    {
+                        InvoiceId = invoice.Id,
+                        ProductId = product.Id,
+                        Qty = item.Qty,
+                        UnitPriceBase = product.Price
+                    });
+
+                    // Stock movement
+                    _context.StockMovements.Add(new StockMovement
+                    {
+                        ProductId = product.Id,
+                        Quantity = item.Qty,
+                        MovementType = "OUT",
+                        ReferenceType = "Invoice",
+                        ReferenceId = invoice.Id,
+                        Date = DateTime.Now
+                    });
+                }
+
+                // ===============================
+                // 💱 تحويل العملة
+                // ===============================
+                decimal totalOriginal;
+
+                if (dto.Currency == Currency.SYP)
+                {
+                    if (dto.ExchangeRate <= 0)
+                        return BadRequest("Exchange rate required for SYP");
+
+                    totalOriginal = totalBase * dto.ExchangeRate;
+                    invoice.ExchangeRate = dto.ExchangeRate;
+                }
+                else
+                {
+                    totalOriginal = totalBase;
+                    invoice.ExchangeRate = 1;
+                }
+
+                // ===============================
+                // 💰 حفظ القيم النهائية
+                // ===============================
+                invoice.TotalBase = totalBase;
+                invoice.TotalOriginal = totalOriginal;
+
+                // ===============================
+                // 💳 حساب الدين (credit)
+                // ===============================
+                if (dto.Type == "credit")
+                {
+                    customer.Balance += totalBase; // دائمًا Base
+                }
+
+                await _context.SaveChangesAsync();
+                await transaction.CommitAsync();
+
+                return Ok(new ApiResponse<object>(
+                    true,
+                    "Invoice created successfully",
+                    new
+                    {
+                        invoice.Id,
+                        TotalBase = totalBase,
+                        TotalOriginal = totalOriginal
+                    }
+                ));
+            }
+            catch (Exception ex)
+            {
+                await transaction.RollbackAsync();
+                return BadRequest(new ApiResponse<string>(false, ex.Message, null));
+            }
+        }
         // 🧾 إنشاء فاتورة
+        /*
         [Authorize(Roles = "Admin,Salesman")]
         [HttpPost]
         public async Task<ActionResult> CreateInvoice(InvoiceCreateDto dto)
@@ -113,7 +235,7 @@ namespace VanSalesAPI.Controllers
                     null
                 ));
             }
-        }
+        }*/
 
         // 📄 جميع الفواتير
         [Authorize(Roles = "Admin,Manager")]

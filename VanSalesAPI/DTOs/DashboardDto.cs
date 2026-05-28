@@ -5,7 +5,11 @@
         public decimal TotalSales { get; set; }
         public decimal TotalCredit { get; set; }
         public decimal TotalCash { get; set; }
+        public decimal TotalSalesUSD { get; set; }
 
+        public decimal TotalCashUSD { get; set; }
+
+        public decimal TotalCreditUSD { get; set; }
         public int CustomersCount { get; set; }
         public int ProductsCount { get; set; }
         public int VansCount { get; set; }
@@ -20,5 +24,6 @@
 
         public decimal Sales { get; set; }
         public int StockItems { get; set; }
+       
     }
 }
