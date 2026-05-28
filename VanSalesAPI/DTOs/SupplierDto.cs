@@ -1,0 +1,12 @@
+﻿public class SupplierDto
+{
+    public int Id { get; set; }
+    public string Name { get; set; }
+    public string Phone { get; set; }
+    public string Address { get; set; }
+
+    public decimal BalanceUSD { get; set; }
+    public decimal BalanceSYP { get; set; }
+
+    public List<SupplierPurchaseDto> Purchases { get; set; }
+}

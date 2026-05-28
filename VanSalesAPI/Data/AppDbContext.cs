@@ -19,7 +19,9 @@ namespace VanSalesAPI.Data
         public DbSet<Product> Products { get; set; }
         public DbSet<Invoice> Invoices { get; set; }
         public DbSet<Van> Vans { get; set; }
-       
+        public DbSet<Supplier> Suppliers { get; set; }
+        public DbSet<Purchase> Purchases { get; set; }
+        public DbSet<PurchaseItem> PurchaseItems { get; set; }
         public DbSet<Salesman> Salesmen { get; set; }
         public DbSet<VanStock> VanStocks { get; set; }
         public DbSet<InvoiceItem> InvoiceItems { get; set; }
