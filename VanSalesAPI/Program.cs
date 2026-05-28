@@ -1,22 +1,25 @@
 ﻿using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using System.Security.Claims;
+using Microsoft.Extensions.DependencyInjection;
 using System.Text;
 using VanSalesAPI.Data;
+using VanSalesAPI.Models;
 
 var builder = WebApplication.CreateBuilder(args);
 
-//
-// ======================================================
-// 📦 DATABASE
-// ======================================================
+
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseSqlServer(
         builder.Configuration.GetConnectionString("DefaultConnection")
     )
 );
+builder.Services.AddIdentity<AppUser, IdentityRole>()
+    .AddEntityFrameworkStores<AppDbContext>()
+    .AddDefaultTokenProviders();
 
 //
 // ======================================================
@@ -36,15 +39,14 @@ builder.Services.AddAuthentication(options =>
         ValidateLifetime = true,
         ValidateIssuerSigningKey = true,
 
-        ValidIssuer = "VanSalesAPI",
-        ValidAudience = "VanSalesAPI",
+        ValidIssuer = builder.Configuration["Jwt:Issuer"],
+        ValidAudience = builder.Configuration["Jwt:Audience"],
 
         IssuerSigningKey = new SymmetricSecurityKey(
-           Encoding.UTF8.GetBytes(builder.Configuration["Jwt:Key"])
-       ),
+            Encoding.UTF8.GetBytes(builder.Configuration["Jwt:Key"])
+        ),
 
-        RoleClaimType = ClaimTypes.Role,
-        NameClaimType = ClaimTypes.NameIdentifier
+        RoleClaimType = ClaimTypes.Role
     };
 });
 
@@ -106,7 +108,20 @@ builder.Services.AddSwaggerGen(options =>
 // 🚀 BUILD APP
 // ======================================================
 var app = builder.Build();
+using (var scope = app.Services.CreateScope())
+{
+    var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole>>();
 
+    var roles = new[] { "Admin", "Manager", "Salesman" };
+
+    foreach (var role in roles)
+    {
+        if (!await roleManager.RoleExistsAsync(role))
+        {
+            await roleManager.CreateAsync(new IdentityRole(role));
+        }
+    }
+}
 //
 // ======================================================
 // 🌐 MIDDLEWARE PIPELINE

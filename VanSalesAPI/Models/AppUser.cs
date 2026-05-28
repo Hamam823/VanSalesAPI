@@ -1,17 +1,13 @@
-﻿namespace VanSalesAPI.Models
+﻿using Microsoft.AspNetCore.Identity;
+
+namespace VanSalesAPI.Models
 {
-    public class AppUser
+    public class AppUser : IdentityUser
     {
-        public int Id { get; set; }
+        public string? FullName { get; set; }
 
-        public string Username { get; set; }
-
-        public string PasswordHash { get; set; }
-
-        public string Role { get; set; }
-        // Admin | Salesman | Manager
-
+        // علاقة اختيارية فقط
         public int? SalesmanId { get; set; }
-        public Salesman Salesman { get; set; }
+        public Salesman? Salesman { get; set; }
     }
 }

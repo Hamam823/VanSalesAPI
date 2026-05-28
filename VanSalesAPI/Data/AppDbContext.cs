@@ -2,9 +2,12 @@
 using System.Collections.Generic;
 using VanSalesAPI.Models;
 
+using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
+using Microsoft.AspNetCore.Identity;
 namespace VanSalesAPI.Data
 {
-    public class AppDbContext : DbContext
+    public class AppDbContext : IdentityDbContext<AppUser>
+
     {
         public AppDbContext(
             DbContextOptions<AppDbContext> options
@@ -16,7 +19,7 @@ namespace VanSalesAPI.Data
         public DbSet<Product> Products { get; set; }
         public DbSet<Invoice> Invoices { get; set; }
         public DbSet<Van> Vans { get; set; }
-        public DbSet<AppUser> Users { get; set; }
+       
         public DbSet<Salesman> Salesmen { get; set; }
         public DbSet<VanStock> VanStocks { get; set; }
         public DbSet<InvoiceItem> InvoiceItems { get; set; }
