@@ -2,6 +2,8 @@
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.EntityFrameworkCore;
 using System.Text;
+using System.Security.Claims;
+using System.IdentityModel.Tokens.Jwt;
 using VanSalesAPI.Data;
 using VanSalesAPI.DTOs;
 using VanSalesAPI.Models;
@@ -18,34 +20,46 @@ namespace VanSalesAPI.Controllers
         {
             _context = context;
         }
+
+        // =====================================================
+        // 🧾 REGISTER
+        // =====================================================
         [HttpPost("register")]
         public async Task<ActionResult> Register(RegisterDto dto)
         {
-            // 1️⃣ التأكد إذا المستخدم موجود
             var existingUser = await _context.Users
                 .FirstOrDefaultAsync(u => u.Username == dto.Username);
 
             if (existingUser != null)
-                return BadRequest("Username already exists");
+                return BadRequest(new ApiResponse<string>(
+                    false,
+                    "Username already exists",
+                    null
+                ));
 
-            // 2️⃣ إنشاء المستخدم
             var user = new AppUser
             {
                 Username = dto.Username,
-                PasswordHash = dto.Password, // لاحقًا نحولها BCrypt
-                Role = dto.Role,
-                SalesmanId = dto.SalesmanId
+                PasswordHash = dto.Password, // لاحقاً BCrypt
+                Role = dto.Role
             };
 
             _context.Users.Add(user);
             await _context.SaveChangesAsync();
 
-            return Ok(new
-            {
-                message = "User registered successfully",
-                userId = user.Id
-            });
+            return Ok(new ApiResponse<object>(
+                true,
+                "User registered successfully",
+                new
+                {
+                    userId = user.Id
+                }
+            ));
         }
+
+        // =====================================================
+        // 🔐 LOGIN
+        // =====================================================
         [HttpPost("login")]
         public async Task<ActionResult> Login(LoginDto dto)
         {
@@ -53,36 +67,53 @@ namespace VanSalesAPI.Controllers
                 .FirstOrDefaultAsync(u => u.Username == dto.Username);
 
             if (user == null)
-                return BadRequest("Invalid username");
+                return BadRequest(new ApiResponse<string>(
+                    false,
+                    "Invalid username",
+                    null
+                ));
 
             if (user.PasswordHash != dto.Password)
-                return BadRequest("Invalid password");
+                return BadRequest(new ApiResponse<string>(
+                    false,
+                    "Invalid password",
+                    null
+                ));
 
-            var tokenHandler = new System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler();
-            var key = Encoding.UTF8.GetBytes("THIS_IS_A_SUPER_SECURE_VAN_SALES_API_SECRET_KEY_2026_ABC123!");
+            var key = Encoding.UTF8.GetBytes(
+                "THIS_IS_A_SUPER_SECURE_VAN_SALES_API_SECRET_KEY_2026_ABC123!"
+            );
+
+            var tokenHandler = new JwtSecurityTokenHandler();
 
             var tokenDescriptor = new SecurityTokenDescriptor
             {
-                Subject = new System.Security.Claims.ClaimsIdentity(new[]
+                Subject = new ClaimsIdentity(new[]
                 {
-                new System.Security.Claims.Claim("id", user.Id.ToString()),
-                new System.Security.Claims.Claim("role", user.Role)
-            }),
+                    new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
+                    new Claim(ClaimTypes.Role, user.Role)
+                }),
                 Expires = DateTime.UtcNow.AddDays(1),
                 Issuer = "VanSalesAPI",
                 Audience = "VanSalesAPI",
                 SigningCredentials = new SigningCredentials(
                     new SymmetricSecurityKey(key),
-                    SecurityAlgorithms.HmacSha256Signature)
+                    SecurityAlgorithms.HmacSha256Signature
+                )
             };
 
             var token = tokenHandler.CreateToken(tokenDescriptor);
 
-            return Ok(new
-            {
-                token = tokenHandler.WriteToken(token),
-                role = user.Role
-            });
+            return Ok(new ApiResponse<object>(
+                true,
+                "Login successful",
+                new
+                {
+                    token = tokenHandler.WriteToken(token),
+                    role = user.Role,
+                    userId = user.Id
+                }
+            ));
         }
     }
 }

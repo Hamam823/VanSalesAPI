@@ -18,10 +18,11 @@ namespace VanSalesAPI.Controllers
             _context = context;
             _cache = cache;
         }
+
+        // 📊 Charts
         [HttpGet("charts")]
         public async Task<ActionResult> GetCharts()
         {
-            // 📈 1. المبيعات اليومية
             var dailySales = await _context.Invoices
                 .GroupBy(i => i.Date.Date)
                 .Select(g => new DailySalesDto
@@ -32,29 +33,36 @@ namespace VanSalesAPI.Controllers
                 .OrderBy(x => x.Date)
                 .ToListAsync();
 
-            // 🚐 2. أداء السيارات
-            var vanPerformance = await _context.Vans
-                .Select(v => new VanPerformanceDto
+            // 🔥 FIX: optimized (no N+1)
+            var vanPerformance = await _context.Invoices
+                .Where(i => i.VanId != null)
+                .GroupBy(i => i.VanId)
+                .Select(g => new
                 {
-                    VanName = v.Name,
-                    TotalSales = _context.Invoices
-                        .Where(i => i.VanId == v.Id)
-                        .Sum(i => i.Total)
+                    VanId = g.Key,
+                    TotalSales = g.Sum(x => x.Total)
                 })
+                .Join(_context.Vans,
+                    g => g.VanId,
+                    v => v.Id,
+                    (g, v) => new VanPerformanceDto
+                    {
+                        VanName = v.Name,
+                        TotalSales = g.TotalSales
+                    })
                 .ToListAsync();
 
-            // 📦 3. أكثر المنتجات مبيعًا
             var productSales = await _context.InvoiceItems
-                .GroupBy(i => i.Product.Name)
+                .Include(i => i.Product)
+                .GroupBy(i => i.ProductId)
                 .Select(g => new ProductSalesDto
                 {
-                    ProductName = g.Key,
+                    ProductName = g.First().Product.Name,
                     Quantity = g.Sum(x => x.Qty)
                 })
                 .OrderByDescending(x => x.Quantity)
                 .ToListAsync();
 
-            // 💰 4. Cash vs Credit
             var payments = await _context.Invoices
                 .GroupBy(i => i.Type)
                 .Select(g => new PaymentTypeDto
@@ -64,38 +72,47 @@ namespace VanSalesAPI.Controllers
                 })
                 .ToListAsync();
 
-            return Ok(new
+            var result = new
             {
                 dailySales,
                 vanPerformance,
                 productSales,
                 payments
-            });
+            };
+
+            return Ok(new ApiResponse<object>(
+                true,
+                "Charts loaded successfully",
+                result
+            ));
         }
 
+        // 📊 Dashboard
         [HttpGet]
         public async Task<ActionResult> GetDashboard()
         {
             string cacheKey = "dashboard_data";
 
-            if (_cache.TryGetValue(cacheKey, out object cachedData))
-                return Ok(cachedData);
+            if (_cache.TryGetValue(cacheKey, out DashboardDto cachedResult))
+            {
+                return Ok(new ApiResponse<DashboardDto>(
+                    true,
+                    "Dashboard loaded from cache",
+                    cachedResult
+                ));
+            }
 
-            // 📦 إجمالي المبيعات (مرة واحدة)
             var invoices = await _context.Invoices.ToListAsync();
 
             var totalSales = invoices.Sum(i => i.Total);
             var totalCash = invoices.Where(i => i.Type == "cash").Sum(i => i.Total);
             var totalCredit = invoices.Where(i => i.Type == "credit").Sum(i => i.Total);
 
-            // 👥 + 📦 + 🚐 Counts (مرة واحدة)
             var customersCount = await _context.Customers.CountAsync();
             var productsCount = await _context.Products.CountAsync();
             var vans = await _context.Vans.ToListAsync();
 
-            // 🚐 Van Performance (بدون N+1)
-            var vanIds = vans.Select(v => v.Id).ToList();
-
+            // 🔥 FIX: optimized grouping
             var vanSales = await _context.Invoices
                 .Where(i => i.VanId != null)
                 .GroupBy(i => i.VanId)
@@ -140,11 +157,13 @@ namespace VanSalesAPI.Controllers
                 Vans = vanSummaries
             };
 
-            // ⏱️ Cache لمدة 5 دقائق
             _cache.Set(cacheKey, result, TimeSpan.FromMinutes(5));
 
-            return Ok(result);
-
+            return Ok(new ApiResponse<DashboardDto>(
+                true,
+                "Dashboard loaded successfully",
+                result
+            ));
         }
     }
 }

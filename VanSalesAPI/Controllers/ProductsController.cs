@@ -7,9 +7,9 @@ using VanSalesAPI.Models;
 
 namespace VanSalesAPI.Controllers
 {
-    [Authorize(Roles = "Admin")]
     [ApiController]
     [Route("api/[controller]")]
+    [Authorize(Roles = "Admin")]
     public class ProductsController : ControllerBase
     {
         private readonly AppDbContext _context;
@@ -19,9 +19,9 @@ namespace VanSalesAPI.Controllers
             _context = context;
         }
 
-        // 📦 GET: api/products
+        // 📦 GET all products
         [HttpGet]
-        public async Task<ActionResult<IEnumerable<ProductDto>>> GetAll()
+        public async Task<ActionResult> GetAll()
         {
             var products = await _context.Products
                 .Select(p => new ProductDto
@@ -34,12 +34,16 @@ namespace VanSalesAPI.Controllers
                 })
                 .ToListAsync();
 
-            return Ok(products);
+            return Ok(new ApiResponse<object>(
+                true,
+                "Products loaded successfully",
+                products
+            ));
         }
 
-        // 📦 GET: api/products/1
+        // 📦 GET by id
         [HttpGet("{id}")]
-        public async Task<ActionResult<ProductDto>> GetById(int id)
+        public async Task<ActionResult> GetById(int id)
         {
             var product = await _context.Products
                 .Where(p => p.Id == id)
@@ -54,12 +58,20 @@ namespace VanSalesAPI.Controllers
                 .FirstOrDefaultAsync();
 
             if (product == null)
-                return NotFound();
+                return NotFound(new ApiResponse<string>(
+                    false,
+                    "Product not found",
+                    null
+                ));
 
-            return Ok(product);
+            return Ok(new ApiResponse<ProductDto>(
+                true,
+                "Product loaded successfully",
+                product
+            ));
         }
 
-        // ➕ POST: api/products
+        // ➕ CREATE
         [HttpPost]
         public async Task<ActionResult> Create(ProductDto dto)
         {
@@ -74,17 +86,25 @@ namespace VanSalesAPI.Controllers
             _context.Products.Add(product);
             await _context.SaveChangesAsync();
 
-            return Ok(product);
+            return Ok(new ApiResponse<object>(
+                true,
+                "Product created successfully",
+                new { product.Id }
+            ));
         }
 
-        // ✏️ PUT: api/products/1
+        // ✏️ UPDATE
         [HttpPut("{id}")]
         public async Task<ActionResult> Update(int id, ProductDto dto)
         {
             var product = await _context.Products.FindAsync(id);
 
             if (product == null)
-                return NotFound();
+                return NotFound(new ApiResponse<string>(
+                    false,
+                    "Product not found",
+                    null
+                ));
 
             product.Name = dto.Name;
             product.Price = dto.Price;
@@ -93,22 +113,34 @@ namespace VanSalesAPI.Controllers
 
             await _context.SaveChangesAsync();
 
-            return Ok(product);
+            return Ok(new ApiResponse<object>(
+                true,
+                "Product updated successfully",
+                new { product.Id }
+            ));
         }
 
-        // ❌ DELETE: api/products/1
+        // ❌ DELETE
         [HttpDelete("{id}")]
         public async Task<ActionResult> Delete(int id)
         {
             var product = await _context.Products.FindAsync(id);
 
             if (product == null)
-                return NotFound();
+                return NotFound(new ApiResponse<string>(
+                    false,
+                    "Product not found",
+                    null
+                ));
 
             _context.Products.Remove(product);
             await _context.SaveChangesAsync();
 
-            return Ok();
+            return Ok(new ApiResponse<object>(
+                true,
+                "Product deleted successfully",
+                null
+            ));
         }
     }
 }

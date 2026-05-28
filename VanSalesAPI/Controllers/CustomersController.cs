@@ -9,7 +9,7 @@ namespace VanSalesAPI.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
-    [Authorize] // 🔐 أي مستخدم لازم يكون مسجل دخول
+    [Authorize]
     public class CustomersController : ControllerBase
     {
         private readonly AppDbContext _context;
@@ -21,21 +21,17 @@ namespace VanSalesAPI.Controllers
 
         // =====================================================
         // 📊 كشف حساب العميل
-        // Admin + Manager فقط
         // =====================================================
         [Authorize(Roles = "Admin,Manager")]
         [HttpGet("{id}/statement")]
-        public async Task<ActionResult<CustomerStatementDto>> GetStatement(int id)
+        public async Task<ActionResult> GetStatement(int id)
         {
             var customer = await _context.Customers
                 .FirstOrDefaultAsync(c => c.Id == id);
 
             if (customer == null)
-                return NotFound("Customer not found");
+                return NotFound(new { message = "Customer not found" });
 
-            // =========================
-            // 📦 الفواتير (Debit)
-            // =========================
             var invoices = await _context.Invoices
                 .Where(i => i.CustomerId == id)
                 .Select(i => new StatementRowDto
@@ -48,9 +44,6 @@ namespace VanSalesAPI.Controllers
                 })
                 .ToListAsync();
 
-            // =========================
-            // 💰 الدفعات (Credit)
-            // =========================
             var payments = await _context.Payments
                 .Where(p => p.CustomerId == id)
                 .Select(p => new StatementRowDto
@@ -63,27 +56,21 @@ namespace VanSalesAPI.Controllers
                 })
                 .ToListAsync();
 
-            // =========================
-            // 🔗 دمج العمليات
-            // =========================
             var transactions = invoices
                 .Concat(payments)
                 .OrderBy(x => x.Date)
                 .ToList();
 
-            // =========================
-            // 🧠 حساب الرصيد المتحرك
-            // =========================
             decimal balance = 0;
 
-            var statement = new List<StatementRowDto>();
+            var items = new List<StatementRowDto>();
 
             foreach (var t in transactions)
             {
                 balance += t.Debit;
                 balance -= t.Credit;
 
-                statement.Add(new StatementRowDto
+                items.Add(new StatementRowDto
                 {
                     Date = t.Date,
                     Type = t.Type,
@@ -93,9 +80,6 @@ namespace VanSalesAPI.Controllers
                 });
             }
 
-            // =========================
-            // 📊 النتيجة النهائية
-            // =========================
             var result = new CustomerStatementDto
             {
                 CustomerId = customer.Id,
@@ -103,19 +87,18 @@ namespace VanSalesAPI.Controllers
                 TotalDebit = invoices.Sum(x => x.Debit),
                 TotalCredit = payments.Sum(x => x.Credit),
                 Balance = balance,
-                Items = statement
+                Items = items
             };
 
             return Ok(result);
         }
 
         // =====================================================
-        // 📋 عرض جميع العملاء
-        // جميع المستخدمين المصرح لهم
+        // 📋 جميع العملاء
         // =====================================================
         [Authorize(Roles = "Admin,Manager,Salesman")]
         [HttpGet]
-        public async Task<ActionResult<IEnumerable<CustomerDto>>> GetAll()
+        public async Task<ActionResult> GetAll()
         {
             var customers = await _context.Customers
                 .Select(c => new CustomerDto
@@ -130,11 +113,11 @@ namespace VanSalesAPI.Controllers
         }
 
         // =====================================================
-        // 👤 تفاصيل عميل
+        // 👤 عميل واحد
         // =====================================================
         [Authorize(Roles = "Admin,Manager,Salesman")]
         [HttpGet("{id}")]
-        public async Task<ActionResult<CustomerDto>> GetById(int id)
+        public async Task<ActionResult> GetById(int id)
         {
             var customer = await _context.Customers
                 .Where(c => c.Id == id)
@@ -168,12 +151,15 @@ namespace VanSalesAPI.Controllers
             _context.Customers.Add(customer);
             await _context.SaveChangesAsync();
 
-            return Ok(customer);
+            return Ok(new
+            {
+                message = "Customer created successfully",
+                customer.Id
+            });
         }
 
         // =====================================================
         // ❌ حذف عميل
-        // Admin فقط
         // =====================================================
         [Authorize(Roles = "Admin")]
         [HttpDelete("{id}")]
@@ -182,7 +168,7 @@ namespace VanSalesAPI.Controllers
             var customer = await _context.Customers.FindAsync(id);
 
             if (customer == null)
-                return NotFound();
+                return NotFound(new { message = "Customer not found" });
 
             _context.Customers.Remove(customer);
             await _context.SaveChangesAsync();

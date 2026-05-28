@@ -1,24 +1,32 @@
-using Microsoft.AspNetCore.Authentication.JwtBearer;
+﻿using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using Microsoft.OpenApi.Models;
+using System.Security.Claims;
 using System.Text;
 using VanSalesAPI.Data;
-using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Microsoft.IdentityModel.Tokens;
-using System.Text;
+
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container.
+//
+// ======================================================
+// 📦 DATABASE
+// ======================================================
+builder.Services.AddDbContext<AppDbContext>(options =>
+    options.UseSqlServer(
+        builder.Configuration.GetConnectionString("DefaultConnection")
+    )
+);
 
-
-
-builder.Services.AddAuthorization();
-builder.Services.AddControllers();
-// Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
-builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
-
-builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+//
+// ======================================================
+// 🔐 AUTHENTICATION (JWT)
+// ======================================================
+builder.Services.AddAuthentication(options =>
+{
+    options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+    options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+})
 .AddJwtBearer(options =>
 {
     options.TokenValidationParameters = new TokenValidationParameters
@@ -27,29 +35,82 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         ValidateAudience = true,
         ValidateLifetime = true,
         ValidateIssuerSigningKey = true,
-        RoleClaimType = "role",
 
         ValidIssuer = "VanSalesAPI",
         ValidAudience = "VanSalesAPI",
+
         IssuerSigningKey = new SymmetricSecurityKey(
-            Encoding.UTF8.GetBytes("THIS_IS_A_SUPER_SECURE_VAN_SALES_API_SECRET_KEY_2026_ABC123!"))
+           Encoding.UTF8.GetBytes(builder.Configuration["Jwt:Key"])
+       ),
+
+        RoleClaimType = ClaimTypes.Role,
+        NameClaimType = ClaimTypes.NameIdentifier
     };
 });
-builder.Services.AddAuthorization(options =>
-{
-    options.AddPolicy("AdminOnly", policy =>
-        policy.RequireRole("Admin"));
 
-    options.AddPolicy("SalesAccess", policy =>
-        policy.RequireRole("Salesman", "Admin"));
-});
+//
+// ======================================================
+// 🔐 AUTHORIZATION
+// ======================================================
 builder.Services.AddAuthorization();
-builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseSqlServer(
-        builder.Configuration.GetConnectionString("DefaultConnection")));
+
+//
+// ======================================================
+// 📦 CONTROLLERS
+// ======================================================
+builder.Services.AddControllers();
+
+//
+// ======================================================
+// 📘 SWAGGER + JWT SUPPORT
+// ======================================================
+builder.Services.AddEndpointsApiExplorer();
+
+builder.Services.AddSwaggerGen(options =>
+{
+    options.SwaggerDoc("v1", new OpenApiInfo
+    {
+        Title = "VanSales API",
+        Version = "v1"
+    });
+
+    // 🔐 JWT Button in Swagger
+    options.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+    {
+        Name = "Authorization",
+        Type = SecuritySchemeType.Http,
+        Scheme = "bearer",
+        BearerFormat = "JWT",
+        In = ParameterLocation.Header,
+        Description = "Enter: Bearer YOUR_TOKEN"
+    });
+
+    options.AddSecurityRequirement(new OpenApiSecurityRequirement
+    {
+        {
+            new OpenApiSecurityScheme
+            {
+                Reference = new OpenApiReference
+                {
+                    Type = ReferenceType.SecurityScheme,
+                    Id = "Bearer"
+                }
+            },
+            new string[] { }
+        }
+    });
+});
+
+//
+// ======================================================
+// 🚀 BUILD APP
+// ======================================================
 var app = builder.Build();
 
-// Configure the HTTP request pipeline.
+//
+// ======================================================
+// 🌐 MIDDLEWARE PIPELINE
+// ======================================================
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
@@ -57,7 +118,8 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
-app.UseAuthentication();
+
+app.UseAuthentication(); // 🔐 مهم جدًا
 app.UseAuthorization();
 
 app.MapControllers();

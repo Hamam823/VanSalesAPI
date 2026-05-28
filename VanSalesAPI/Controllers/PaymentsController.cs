@@ -9,7 +9,7 @@ namespace VanSalesAPI.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
-    [Authorize] // 🔐 تسجيل دخول مطلوب
+    [Authorize]
     public class PaymentsController : ControllerBase
     {
         private readonly AppDbContext _context;
@@ -19,32 +19,32 @@ namespace VanSalesAPI.Controllers
             _context = context;
         }
 
-        // =====================================================
         // 💰 إضافة دفعة
-        // Admin + Salesman
-        // =====================================================
         [Authorize(Roles = "Admin,Salesman")]
         [HttpPost]
         public async Task<ActionResult> AddPayment(PaymentCreateDto dto)
         {
-            using var transaction = await _context.Database.BeginTransactionAsync();
+            await using var transaction = await _context.Database.BeginTransactionAsync();
 
             try
             {
-                // 🛡️ تحقق المبلغ
                 if (dto.Amount <= 0)
-                    return BadRequest("Amount must be greater than zero");
+                    return BadRequest(new ApiResponse<string>(
+                        false,
+                        "Amount must be greater than zero",
+                        null
+                    ));
 
-                // 🛡️ تحقق العميل
                 var customer = await _context.Customers
                     .FirstOrDefaultAsync(c => c.Id == dto.CustomerId);
 
                 if (customer == null)
-                    return BadRequest("Customer not found");
+                    return BadRequest(new ApiResponse<string>(
+                        false,
+                        "Customer not found",
+                        null
+                    ));
 
-                // =====================================================
-                // 💰 إنشاء الدفعة
-                // =====================================================
                 var payment = new Payment
                 {
                     CustomerId = dto.CustomerId,
@@ -55,46 +55,36 @@ namespace VanSalesAPI.Controllers
 
                 _context.Payments.Add(payment);
 
-                // =====================================================
-                // 💳 تخفيض الدين
-                // =====================================================
                 customer.Balance -= dto.Amount;
 
-                // 🛡️ منع الرصيد السالب
                 if (customer.Balance < 0)
                     customer.Balance = 0;
 
                 await _context.SaveChangesAsync();
-
                 await transaction.CommitAsync();
 
-                return Ok(new
-                {
-                    message = "Payment added successfully",
-                    customerBalance = customer.Balance
-                });
+                return Ok(new ApiResponse<object>(
+                    true,
+                    "Payment added successfully",
+                    new
+                    {
+                        customerBalance = customer.Balance
+                    }
+                ));
             }
             catch (Exception ex)
             {
-                try
-                {
-                    await transaction.RollbackAsync();
-                }
-                catch
-                {
-                }
+                await transaction.RollbackAsync();
 
-                return BadRequest(new
-                {
-                    error = ex.Message
-                });
+                return BadRequest(new ApiResponse<string>(
+                    false,
+                    ex.Message,
+                    null
+                ));
             }
         }
 
-        // =====================================================
         // 📊 كشف الحساب
-        // Admin + Manager
-        // =====================================================
         [Authorize(Roles = "Admin,Manager")]
         [HttpGet("statement/{customerId}")]
         public async Task<ActionResult> GetStatement(int customerId)
@@ -103,11 +93,12 @@ namespace VanSalesAPI.Controllers
                 .FirstOrDefaultAsync(c => c.Id == customerId);
 
             if (customer == null)
-                return NotFound("Customer not found");
+                return NotFound(new ApiResponse<string>(
+                    false,
+                    "Customer not found",
+                    null
+                ));
 
-            // =====================================================
-            // 📦 الفواتير
-            // =====================================================
             var invoices = await _context.Invoices
                 .Where(i => i.CustomerId == customerId)
                 .Select(i => new
@@ -119,9 +110,6 @@ namespace VanSalesAPI.Controllers
                 })
                 .ToListAsync();
 
-            // =====================================================
-            // 💰 الدفعات
-            // =====================================================
             var payments = await _context.Payments
                 .Where(p => p.CustomerId == customerId)
                 .Select(p => new
@@ -133,9 +121,6 @@ namespace VanSalesAPI.Controllers
                 })
                 .ToListAsync();
 
-            // =====================================================
-            // 🔗 دمج العمليات
-            // =====================================================
             var transactions = invoices
                 .Concat(payments)
                 .OrderBy(x => x.Date)
@@ -158,18 +143,19 @@ namespace VanSalesAPI.Controllers
                 };
             }).ToList();
 
-            // =====================================================
-            // 📊 النتيجة النهائية
-            // =====================================================
-            return Ok(new CustomerStatementDto
-            {
-                CustomerId = customer.Id,
-                CustomerName = customer.Name,
-                TotalDebit = invoices.Sum(x => x.Debit),
-                TotalCredit = payments.Sum(x => x.Credit),
-                Balance = balance,
-                Items = items
-            });
+            return Ok(new ApiResponse<CustomerStatementDto>(
+                true,
+                "Statement loaded successfully",
+                new CustomerStatementDto
+                {
+                    CustomerId = customer.Id,
+                    CustomerName = customer.Name,
+                    TotalDebit = invoices.Sum(x => x.Debit),
+                    TotalCredit = payments.Sum(x => x.Credit),
+                    Balance = balance,
+                    Items = items
+                }
+            ));
         }
     }
 }

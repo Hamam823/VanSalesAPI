@@ -9,7 +9,7 @@ namespace VanSalesAPI.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
-    [Authorize] // 🔐 أي عملية تحتاج تسجيل دخول
+    [Authorize]
     public class InvoicesController : ControllerBase
     {
         private readonly AppDbContext _context;
@@ -19,10 +19,7 @@ namespace VanSalesAPI.Controllers
             _context = context;
         }
 
-        // =====================================================
         // 🧾 إنشاء فاتورة
-        // Admin + Salesman
-        // =====================================================
         [Authorize(Roles = "Admin,Salesman")]
         [HttpPost]
         public async Task<ActionResult> CreateInvoice(InvoiceCreateDto dto)
@@ -31,22 +28,18 @@ namespace VanSalesAPI.Controllers
 
             try
             {
-                // 🛡️ تحقق من وجود عناصر
                 if (dto.Items == null || !dto.Items.Any())
-                    throw new Exception("Invoice items are required");
+                    return BadRequest(new ApiResponse<string>(false, "Invoice items are required", null));
 
-                // 🛡️ تحقق من نوع الفاتورة
                 if (dto.Type != "cash" && dto.Type != "credit")
-                    throw new Exception("Invoice type must be cash or credit");
+                    return BadRequest(new ApiResponse<string>(false, "Invoice type must be cash or credit", null));
 
-                // 🛡️ تحقق العميل
                 var customer = await _context.Customers
                     .FirstOrDefaultAsync(c => c.Id == dto.CustomerId);
 
                 if (customer == null)
-                    throw new Exception("Customer not found");
+                    return NotFound(new ApiResponse<string>(false, "Customer not found", null));
 
-                // 🧾 إنشاء الفاتورة
                 var invoice = new Invoice
                 {
                     CustomerId = dto.CustomerId,
@@ -56,47 +49,36 @@ namespace VanSalesAPI.Controllers
                 };
 
                 _context.Invoices.Add(invoice);
-
                 await _context.SaveChangesAsync();
 
                 decimal total = 0;
 
-                // =====================================================
-                // 📦 معالجة المنتجات
-                // =====================================================
                 foreach (var item in dto.Items)
                 {
                     if (item.Qty <= 0)
-                        throw new Exception("Quantity must be greater than zero");
+                        return BadRequest(new ApiResponse<string>(false, "Invalid quantity", null));
 
-                    var product = await _context.Products
-                        .FirstOrDefaultAsync(p => p.Id == item.ProductId);
+                    var product = await _context.Products.FindAsync(item.ProductId);
 
                     if (product == null)
-                        throw new Exception($"Product with ID {item.ProductId} not found");
+                        return NotFound(new ApiResponse<string>(false, $"Product {item.ProductId} not found", null));
 
                     if (product.Stock < item.Qty)
-                        throw new Exception($"Not enough stock for product: {product.Name}");
+                        return BadRequest(new ApiResponse<string>(false, "Not enough stock", null));
 
-                    decimal lineTotal = product.Price * item.Qty;
+                    total += product.Price * item.Qty;
 
-                    total += lineTotal;
-
-                    var invoiceItem = new InvoiceItem
+                    _context.InvoiceItems.Add(new InvoiceItem
                     {
                         InvoiceId = invoice.Id,
                         ProductId = product.Id,
                         Qty = item.Qty,
                         Price = product.Price
-                    };
+                    });
 
-                    _context.InvoiceItems.Add(invoiceItem);
-
-                    // 📉 خصم المخزون
                     product.Stock -= item.Qty;
 
-                    // 📊 حركة مخزون
-                    var stockMovement = new StockMovement
+                    _context.StockMovements.Add(new StockMovement
                     {
                         ProductId = product.Id,
                         Quantity = item.Qty,
@@ -104,55 +86,39 @@ namespace VanSalesAPI.Controllers
                         ReferenceType = "Invoice",
                         ReferenceId = invoice.Id,
                         Date = DateTime.Now
-                    };
-
-                    _context.StockMovements.Add(stockMovement);
+                    });
                 }
 
-                // 💰 تحديث الإجمالي
                 invoice.Total = total;
 
-                // 💳 الفواتير الآجلة
                 if (dto.Type == "credit")
-                {
                     customer.Balance += total;
-                }
 
                 await _context.SaveChangesAsync();
-
                 await transaction.CommitAsync();
 
-                return Ok(new
-                {
-                    message = "Invoice created successfully",
-                    invoiceId = invoice.Id,
-                    total = total
-                });
+                return Ok(new ApiResponse<object>(
+                    true,
+                    "Invoice created successfully",
+                    new { invoice.Id, total }
+                ));
             }
             catch (Exception ex)
             {
-                try
-                {
-                    await transaction.RollbackAsync();
-                }
-                catch
-                {
-                }
+                await transaction.RollbackAsync();
 
-                return BadRequest(new
-                {
-                    error = ex.Message
-                });
+                return BadRequest(new ApiResponse<string>(
+                    false,
+                    ex.Message,
+                    null
+                ));
             }
         }
 
-        // =====================================================
         // 📄 جميع الفواتير
-        // Admin + Manager
-        // =====================================================
         [Authorize(Roles = "Admin,Manager")]
         [HttpGet]
-        public async Task<ActionResult<IEnumerable<InvoiceReadDto>>> GetAll()
+        public async Task<ActionResult> GetAll()
         {
             var invoices = await _context.Invoices
                 .Include(i => i.Customer)
@@ -165,7 +131,6 @@ namespace VanSalesAPI.Controllers
                     Type = i.Type,
                     Total = i.Total,
                     CustomerName = i.Customer.Name,
-
                     Items = i.Items.Select(ii => new InvoiceItemReadDto
                     {
                         ProductName = ii.Product.Name,
@@ -175,16 +140,17 @@ namespace VanSalesAPI.Controllers
                 })
                 .ToListAsync();
 
-            return Ok(invoices);
+            return Ok(new ApiResponse<object>(
+                true,
+                "Invoices loaded successfully",
+                invoices
+            ));
         }
 
-        // =====================================================
         // 📄 فاتورة واحدة
-        // Admin + Manager
-        // =====================================================
         [Authorize(Roles = "Admin,Manager")]
         [HttpGet("{id}")]
-        public async Task<ActionResult<InvoiceReadDto>> GetById(int id)
+        public async Task<ActionResult> GetById(int id)
         {
             var invoice = await _context.Invoices
                 .Include(i => i.Customer)
@@ -198,7 +164,6 @@ namespace VanSalesAPI.Controllers
                     Type = i.Type,
                     Total = i.Total,
                     CustomerName = i.Customer.Name,
-
                     Items = i.Items.Select(ii => new InvoiceItemReadDto
                     {
                         ProductName = ii.Product.Name,
@@ -209,9 +174,17 @@ namespace VanSalesAPI.Controllers
                 .FirstOrDefaultAsync();
 
             if (invoice == null)
-                return NotFound();
+                return NotFound(new ApiResponse<string>(
+                    false,
+                    "Invoice not found",
+                    null
+                ));
 
-            return Ok(invoice);
+            return Ok(new ApiResponse<InvoiceReadDto>(
+                true,
+                "Invoice loaded successfully",
+                invoice
+            ));
         }
     }
 }

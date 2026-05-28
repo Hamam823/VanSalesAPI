@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.Authorization;
+﻿
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using VanSalesAPI.Data;
@@ -9,7 +10,7 @@ namespace VanSalesAPI.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
-    [Authorize] // 🔐 حماية كاملة
+    [Authorize]
     public class VansController : ControllerBase
     {
         private readonly AppDbContext _context;
@@ -19,10 +20,7 @@ namespace VanSalesAPI.Controllers
             _context = context;
         }
 
-        // =====================================================
         // 📦 تحميل السيارة
-        // Admin + Salesman
-        // =====================================================
         [Authorize(Roles = "Admin,Salesman")]
         [HttpPost("load")]
         public async Task<ActionResult> LoadVan(LoadVanDto dto)
@@ -32,20 +30,36 @@ namespace VanSalesAPI.Controllers
             try
             {
                 var van = await _context.Vans.FindAsync(dto.VanId);
+
                 if (van == null)
-                    return BadRequest("Van not found");
+                    return BadRequest(new ApiResponse<string>(
+                        false,
+                        "Van not found",
+                        null
+                    ));
 
                 var product = await _context.Products.FindAsync(dto.ProductId);
+
                 if (product == null)
-                    return BadRequest("Product not found");
+                    return BadRequest(new ApiResponse<string>(
+                        false,
+                        "Product not found",
+                        null
+                    ));
 
                 if (product.Stock < dto.Quantity)
-                    return BadRequest("Insufficient warehouse stock");
+                    return BadRequest(new ApiResponse<string>(
+                        false,
+                        "Insufficient warehouse stock",
+                        null
+                    ));
 
                 product.Stock -= dto.Quantity;
 
                 var vanStock = await _context.VanStocks
-                    .FirstOrDefaultAsync(vs => vs.VanId == dto.VanId && vs.ProductId == dto.ProductId);
+                    .FirstOrDefaultAsync(vs =>
+                        vs.VanId == dto.VanId &&
+                        vs.ProductId == dto.ProductId);
 
                 if (vanStock == null)
                 {
@@ -55,6 +69,7 @@ namespace VanSalesAPI.Controllers
                         ProductId = dto.ProductId,
                         Quantity = dto.Quantity
                     };
+
                     _context.VanStocks.Add(vanStock);
                 }
                 else
@@ -65,19 +80,25 @@ namespace VanSalesAPI.Controllers
                 await _context.SaveChangesAsync();
                 await transaction.CommitAsync();
 
-                return Ok(new { message = "Van loaded successfully" });
+                return Ok(new ApiResponse<string>(
+                    true,
+                    "Van loaded successfully",
+                    null
+                ));
             }
             catch (Exception ex)
             {
                 await transaction.RollbackAsync();
-                return BadRequest(ex.Message);
+
+                return BadRequest(new ApiResponse<string>(
+                    false,
+                    ex.Message,
+                    null
+                ));
             }
         }
 
-        // =====================================================
         // 🚐 إنشاء سيارة
-        // Admin + Manager
-        // =====================================================
         [Authorize(Roles = "Admin,Manager")]
         [HttpPost]
         public async Task<ActionResult> CreateVan(VanDto dto)
@@ -91,15 +112,17 @@ namespace VanSalesAPI.Controllers
             };
 
             _context.Vans.Add(van);
+
             await _context.SaveChangesAsync();
 
-            return Ok(van);
+            return Ok(new ApiResponse<object>(
+                true,
+                "Van created successfully",
+                van
+            ));
         }
 
-        // =====================================================
         // 📊 Inventory Report
-        // Admin + Manager
-        // =====================================================
         [Authorize(Roles = "Admin,Manager")]
         [HttpGet("inventory-report")]
         public async Task<ActionResult> GetInventoryReport()
@@ -129,12 +152,15 @@ namespace VanSalesAPI.Controllers
                 };
             });
 
-            return Ok(result);
+            return Ok(new ApiResponse<object>(
+                true,
+                "Inventory report loaded successfully",
+                result
+            ));
         }
 
-        // =====================================================
         // 🚐 تفاصيل مخزون السيارات
-        // =====================================================
+        [Authorize(Roles = "Admin,Manager")]
         [HttpGet("stock-detail")]
         public async Task<ActionResult> GetVanStockDetail()
         {
@@ -148,6 +174,7 @@ namespace VanSalesAPI.Controllers
             {
                 VanId = van.Id,
                 VanName = van.Name,
+
                 Products = vanStocks
                     .Where(vs => vs.VanId == van.Id)
                     .Select(vs => new VanProductStockDto
@@ -155,15 +182,19 @@ namespace VanSalesAPI.Controllers
                         ProductId = vs.ProductId,
                         ProductName = vs.Product.Name,
                         Quantity = vs.Quantity
-                    }).ToList()
+                    })
+                    .ToList()
             });
 
-            return Ok(result);
+            return Ok(new ApiResponse<object>(
+                true,
+                "Van stock details loaded successfully",
+                result
+            ));
         }
 
-        // =====================================================
         // 📊 Van Summary
-        // =====================================================
+        [Authorize(Roles = "Admin,Manager")]
         [HttpGet("{id}/summary")]
         public async Task<ActionResult> GetVanSummary(int id)
         {
@@ -175,17 +206,19 @@ namespace VanSalesAPI.Controllers
                 .Where(i => i.VanId == id)
                 .SumAsync(i => i.Total);
 
-            return Ok(new
-            {
-                VanId = id,
-                TotalStock = stock,
-                TotalSales = sales
-            });
+            return Ok(new ApiResponse<object>(
+                true,
+                "Van summary loaded successfully",
+                new
+                {
+                    VanId = id,
+                    TotalStock = stock,
+                    TotalSales = sales
+                }
+            ));
         }
 
-        // =====================================================
         // 🔁 إرجاع للمستودع
-        // =====================================================
         [Authorize(Roles = "Admin,Salesman")]
         [HttpPost("return")]
         public async Task<ActionResult> ReturnToWarehouse(VanReturnDto dto)
@@ -195,31 +228,52 @@ namespace VanSalesAPI.Controllers
             try
             {
                 var vanStock = await _context.VanStocks
-                    .FirstOrDefaultAsync(vs => vs.VanId == dto.VanId && vs.ProductId == dto.ProductId);
+                    .FirstOrDefaultAsync(vs =>
+                        vs.VanId == dto.VanId &&
+                        vs.ProductId == dto.ProductId);
 
                 if (vanStock == null || vanStock.Quantity < dto.Quantity)
-                    return BadRequest("Invalid stock");
+                    return BadRequest(new ApiResponse<string>(
+                        false,
+                        "Invalid stock",
+                        null
+                    ));
+
+                var product = await _context.Products.FindAsync(dto.ProductId);
+
+                if (product == null)
+                    return BadRequest(new ApiResponse<string>(
+                        false,
+                        "Product not found",
+                        null
+                    ));
 
                 vanStock.Quantity -= dto.Quantity;
 
-                var product = await _context.Products.FindAsync(dto.ProductId);
                 product.Stock += dto.Quantity;
 
                 await _context.SaveChangesAsync();
                 await transaction.CommitAsync();
 
-                return Ok(new { message = "Returned successfully" });
+                return Ok(new ApiResponse<string>(
+                    true,
+                    "Returned successfully",
+                    null
+                ));
             }
             catch (Exception ex)
             {
                 await transaction.RollbackAsync();
-                return BadRequest(ex.Message);
+
+                return BadRequest(new ApiResponse<string>(
+                    false,
+                    ex.Message,
+                    null
+                ));
             }
         }
 
-        // =====================================================
         // 💰 ربح السيارات
-        // =====================================================
         [Authorize(Roles = "Admin,Manager")]
         [HttpGet("profit")]
         public async Task<ActionResult> GetVanProfit()
@@ -230,23 +284,30 @@ namespace VanSalesAPI.Controllers
                 .Select(g => new VanProfitDto
                 {
                     VanId = g.Key.Value,
+
                     VanName = _context.Vans
                         .Where(v => v.Id == g.Key)
                         .Select(v => v.Name)
                         .FirstOrDefault(),
 
                     TotalSales = g.Sum(x => x.Qty * x.Price),
+
                     TotalCost = g.Sum(x => x.Qty * x.Product.Cost),
-                    Profit = g.Sum(x => x.Qty * x.Price) - g.Sum(x => x.Qty * x.Product.Cost)
+
+                    Profit =
+                        g.Sum(x => x.Qty * x.Price) -
+                        g.Sum(x => x.Qty * x.Product.Cost)
                 })
                 .ToListAsync();
 
-            return Ok(result);
+            return Ok(new ApiResponse<object>(
+                true,
+                "Profit report loaded successfully",
+                result
+            ));
         }
 
-        // =====================================================
         // 🚐 البيع من السيارة
-        // =====================================================
         [Authorize(Roles = "Admin,Salesman")]
         [HttpPost("sell")]
         public async Task<ActionResult> SellFromVan(VanSaleDto dto)
@@ -256,8 +317,13 @@ namespace VanSalesAPI.Controllers
             try
             {
                 var van = await _context.Vans.FindAsync(dto.VanId);
+
                 if (van == null)
-                    return BadRequest("Van not found");
+                    return BadRequest(new ApiResponse<string>(
+                        false,
+                        "Van not found",
+                        null
+                    ));
 
                 var invoice = new Invoice
                 {
@@ -269,6 +335,7 @@ namespace VanSalesAPI.Controllers
                 };
 
                 _context.Invoices.Add(invoice);
+
                 await _context.SaveChangesAsync();
 
                 decimal total = 0;
@@ -276,12 +343,25 @@ namespace VanSalesAPI.Controllers
                 foreach (var item in dto.Items)
                 {
                     var vanStock = await _context.VanStocks
-                        .FirstOrDefaultAsync(vs => vs.VanId == dto.VanId && vs.ProductId == item.ProductId);
+                        .FirstOrDefaultAsync(vs =>
+                            vs.VanId == dto.VanId &&
+                            vs.ProductId == item.ProductId);
 
                     if (vanStock == null || vanStock.Quantity < item.Quantity)
-                        return BadRequest("Insufficient van stock");
+                        return BadRequest(new ApiResponse<string>(
+                            false,
+                            "Insufficient van stock",
+                            null
+                        ));
 
                     var product = await _context.Products.FindAsync(item.ProductId);
+
+                    if (product == null)
+                        return BadRequest(new ApiResponse<string>(
+                            false,
+                            "Product not found",
+                            null
+                        ));
 
                     total += product.Price * item.Quantity;
 
@@ -301,18 +381,40 @@ namespace VanSalesAPI.Controllers
                 if (dto.Type == "credit")
                 {
                     var customer = await _context.Customers.FindAsync(dto.CustomerId);
+
+                    if (customer == null)
+                        return BadRequest(new ApiResponse<string>(
+                            false,
+                            "Customer not found",
+                            null
+                        ));
+
                     customer.Balance += total;
                 }
 
                 await _context.SaveChangesAsync();
+
                 await transaction.CommitAsync();
 
-                return Ok(new { invoice.Id, total });
+                return Ok(new ApiResponse<object>(
+                    true,
+                    "Sale completed successfully",
+                    new
+                    {
+                        invoice.Id,
+                        total
+                    }
+                ));
             }
             catch (Exception ex)
             {
                 await transaction.RollbackAsync();
-                return BadRequest(ex.Message);
+
+                return BadRequest(new ApiResponse<string>(
+                    false,
+                    ex.Message,
+                    null
+                ));
             }
         }
     }
